@@ -150,7 +150,7 @@ page_out (struct page *p)
      page. */
 
 /* add code here */
-  pagedir_clear_page(p->thread->pagedir, (void *) p->addr);
+  pagedir_clear_page (p->thread->pagedir, (void *) p->addr);
 
   /* Has the frame been modified? */
 
@@ -159,42 +159,31 @@ page_out (struct page *p)
   dirty = pagedir_is_dirty (p->thread->pagedir, (const void *) p->addr);
 
   /* If the frame is not dirty (and file != NULL), we have sucsessfully evicted the page. */
-  if(!dirty)
-  {
+  if ( !dirty )
     ok = true;
-  }
 
   /* Write frame contents to disk if necessary. */
-  /* If the file is null, we definitely don't want to write the frame to disk. We must swap out the
-     frame and save whether or not the swap was successful. This could overwrite the previous value of
-     'ok'. */
-  if (p->file == NULL)
-  {
+  /* If the file is null, don't write the frame to disk. Instead swap out the frame and save 
+     whether or not the swap was successful. This will overwrite the value of 'ok'. */
+  if ( p->file == NULL )
     ok = swap_out(p);
-  }
   /* Otherwise, a file exists for this page. If file contents have been modified, then they must be
      be written back to the file system on disk, or swapped out. This is determined by the private
      variable associated with the page. */
   else
-  {
-    if (dirty)
     {
-      if(p->private)
+      if ( dirty )
       {
-        ok = swap_out(p);
-      }
-      else
-      {
-        ok = file_write_at(p->file, (const void *) p->frame->base, p->file_bytes, p->file_offset);
+        if ( p->private )
+          ok = swap_out(p);
+        else
+          ok = file_write_at(p->file, (const void *) p->frame->base, p->file_bytes, p->file_offset);
       }
     }
-  }
 
-  /* Nullify the frame held by the page. */
-  if(ok)
-  {
+  /* Make the frame helpd by the page Null */
+  if ( ok )
     p->frame = NULL;
-  }
 /* add code here */
 
   return ok;
