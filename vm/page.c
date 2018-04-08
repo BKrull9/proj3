@@ -11,6 +11,7 @@
 
 /* Maximum size of process stack, in bytes. */
 #define STACK_MAX (1024 * 1024)
+#define PUSHA_SIZE 32
 
 /* Destroys a page, which must be in the current process's
    page table.  Used as a callback for hash_destroy(). */
@@ -24,7 +25,7 @@ destroy_page (struct hash_elem *p_, void *aux UNUSED)
   free (p);
 }
 
-/* Destroys the current process's page table. */
+/* Destroys the current process's page table. -Called during process_exit() */
 void
 page_exit (void) 
 {
@@ -53,10 +54,9 @@ page_for_addr (const void *address)
       /* No page.  Expand stack? */
 
 /* add code */
-      if ((p.addr > PHYS_BASE - STACK_MAX) && ((void *)thread_current()->user_esp - 32 < address))
-      {
+/* TODO: Time permitting, find theoretical stack limit and check that instead of PUSHA_SIZS */
+      if ((p.addr > PHYS_BASE - STACK_MAX) && ((void *)thread_current()->user_esp - PUSHA_SIZE < address))
         return page_allocate (p.addr, false);
-      }
 
     }
   return NULL;
@@ -174,8 +174,10 @@ page_out (struct page *p)
     {
       if ( dirty )
       {
+        /* Possibly data demand-paged from executable, so swap */
         if ( p->private )
           ok = swap_out(p);
+        /* memory mapped */
         else
           ok = file_write_at(p->file, (const void *) p->frame->base, p->file_bytes, p->file_offset);
       }
