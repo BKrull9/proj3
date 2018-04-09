@@ -1,0 +1,269 @@
+		           +---------------------------+
+       	           |         CIS 520           |
+		           | PROJECT 3: Virtual Memory |
+		           |     DESIGN DOCUMENT       |
+		           +---------------------------+
+
+---- GROUP ----
+
+>> Fill in the names of your group members.
+
+Brent Krull
+Zach Marcolesco
+Zakary Kedrovsky
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+Online:
+
+	1. https://github.com/ChristianJHuges/pintos-project3/
+	2. https://xania.org/200808/hacking-about-with-stacks
+	
+
+
+			PAGE TABLE MANAGEMENT
+			=====================
+
+---- ALGORITHMS ----
+
+>> A1: In a few paragraphs, describe the existing code for locating the
+>> frame, if any, that contains the data of a given page.
+
+The page struct contains a pointer to the frame that houses its physical data.
+This frame is initially allocated in the frame_alloc_and_lock() function (called
+in do_page_in), which tries 3 times to allocate, lock and return (sets the
+pointer in the page struct) a frame for the page. In each try, if a free frame
+is not found,  there is an attempt to evict a frame, and if it can not evict a
+frame, it returns NULL. If at the end of the 3 tries no frame has been
+allocated, then frame_alloc_and_lock() returns NULL.
+
+After a frame has been allocated (or not), execution resumes in the do_page_in()
+function. If no frame was allocated, the function returns false to signify
+failure. Otherwise, it copies the data into the frame and returns true to
+signify success.
+
+
+---- SYNCHRONIZATION ----
+
+>> A2: When two user processes both need a new frame at the same time,
+>> how are races avoided?
+
+Two locks are used to ensure atomicity and eliminate race conditions. First,
+each frame has its own lock, which helps prevent simultaneous allocation to each
+individual frame. In addition, frame table access is limited to a single process
+through an additional lock (called scan_lock). Since no two processes can access
+the frame table simultaneously, they cannot allocate simultaneously, thus
+avoiding any race conditions.
+
+		       PAGING TO AND FROM DISK
+		       =======================
+
+---- ALGORITHMS ----
+
+>> B1: When a frame is required but none is free, some frame must be
+>> evicted.  Describe the algorithm used to choose a frame to evict.
+
+For each frame in the list, we first check for free frames; if none are found,
+we must choose a frame to evict.
+
+The frame table is looped through twice, checking each frame: we ensure that
+(a) the frame is not currently being accessed by another process,
+(b) ensure that the frame is not already free, and
+(c) that the page was not accessed recently.
+If all three of these are true, then the frame is evicted, and the page is
+given ownership of the frame. If (a) fails, nothing is done; if (b) fails, the
+page is given ownership of the frame; and if (c) fails, nothing is done.
+
+
+>> B2: Explain your heuristic for deciding whether a page fault for an
+>> invalid virtual address should cause the stack to be extended into
+>> the page that faulted.
+
+We decided on using an approach like the one Linux uses, as described by
+our second source. First we ensure that space is available for a page to be
+allocated within the stack space, and then "any access within 32 bytes below
+the current stack pointer [are treated] as being valid." This is to accomadate
+for some of the x86 instructions that write to memory before the update the 
+stack pointer (PUSH, PUSHA, etc).
+
+			 MEMORY MAPPED FILES
+			 ===================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+In syscall.c:
+
+struct mapping
+  {
+    struct list_elem elem;      /* List element. */
+    int handle;                 /* Mapping id. */
+    struct file *file;          /* File. */
+    uint8_t *base;              /* Start of memory mapping. */
+    size_t page_cnt;            /* Number of pages mapped. */
+  };
+  
+Binds a mapping id to a region of memory and a file. Each member
+has a descriptive comment next to it.
+
+In thread.h:
+
+struct thread 
+  {
+  ...
+	struct hash *pages			/* Page table. */
+	...
+	struct list mappings		/* Memory-mapped files. */
+	...
+	void *user_esp				/* User's stack pointer. */
+  ...
+  };
+
+Added memebers to the struct to keep track of the page table (4.1.2.3),
+a list of memory-mapped files (4.1.7), and the stack pointer at the time
+of an interruption for each thread/process.
+
+In frame.h:
+
+struct frame 
+  {
+    struct lock lock;           /* Prevent simultaneous access. */
+    void *base;                 /* Kernel virtual base address. */
+    struct page *page;          /* Mapped process page, if any. */
+  };
+  
+This represents a physical frame of memory. Contains a lock to prevent 
+multiple processes/threads from accessing it simultaneously, a base pointer
+to the kernel virtual address (which is mapped directly onto physical 
+memory, 4.1.2.2), and a reference to the page that is mapped to it (if 
+there is one).
+
+In page.h:
+
+struct page 
+  {
+    /* Immutable members. */
+    void *addr;                 /* User virtual address. */
+    bool read_only;             /* Read-only page? */
+    struct thread *thread;      /* Owning thread. */
+
+    /* ... Process context. */
+    struct hash_elem hash_elem; /* struct thread `pages' hash element. */
+	...
+    struct frame *frame;        /* Page frame. */
+
+    /* Swap information ... */
+    block_sector_t sector;       /* Starting sector of swap area, or -1. */
+    
+    /* Memory-mapped file information ... */
+    bool private;               /* False to write back to file,
+                                   true to write back to swap. */
+    struct file *file;          /* File. */
+    off_t file_offset;          /* Offset in file. */
+    off_t file_bytes;           /* Bytes to read/write, 1...PGSIZE. */
+  };
+  
+This represents a page in virtual memory. We've organized the definitions
+by the header comments for each section:
+
+	- Immutable Members: This section contains a base pointer to an address
+						 in VM, as well as a boolean tracker to determine if
+						 it is a r/o page, and a reference to the thread the
+						 page corresponds to.
+						 
+	- Process Context:	This section contains a hash element used to keep
+						track of the page in the thread/process's page table,
+						and a reference to the frame that houses it's physical
+						data (if there is one).
+						
+	- Swap Information:	This section merely contains a reference to the sector
+						of the swap area that its data has been swapped out of
+						memory to (or -1 if there is none).
+						
+	- MM File Info:		This section contains a boolean to track whether or not
+						the page is shared or private. It also contains a 
+						reference to the file it is being mapped to, as well as
+						the in-file offset at which the mapping begins, and the 
+						number of bytes after the offset that are mapped to.
+
+
+
+
+
+---- ALGORITHMS ----
+
+>> C2: Describe how memory mapped files integrate into your virtual
+>> memory subsystem.  Explain how the page fault and eviction
+>> processes differ between swap pages and other pages.
+
+In syscall.c, a struct called mapping controls file memory mapping.
+This struct includes a unique id similar to a file descriptor and
+a reference to the mapped file, as well as the address of the
+mapping. Mapped files for a specific thread are stored within a
+list inside the given thread. If the file is not directly in
+memory, the memory-mapped pages are treated the same as a normal
+page on the disk.
+
+Most types of pages are simply swapped, dirty or not. However,
+files are only written if they have been modified, avoiding
+swapping.
+
+(Unlike other pages, files are only written if they have been modified,
+avoiding swapping entirely.)
+
+>> C3: Explain how you determine whether a new file mapping overlaps
+>> any existing segment.
+
+The hash_insert() function uses the page table to allocate; if that
+location is already occupied, it returns without writing. Futhermore, in
+page_allocate(), the start address is rounded down to the beginning of the
+closest page. his ensures that if two addresses in the same pages are requested
+the will first be allocated the whole page and the second will not be added to
+the table because of hash_insert().
+
+---- RATIONALE ----
+
+>> C4: Mappings created with "mmap" have similar semantics to those of
+>> data demand-paged from executables, except that "mmap" mappings are
+>> written back to their original files, not to swap.  This implies
+>> that much of their implementation can be shared.  Explain why your
+>> implementation either does or does not share much of the code for
+>> the two situations.
+
+We used the implementation given in the starter code, which uses a variable 
+called private to control whether data is swapped or written to the disk. 
+This allows us to manage different page types with much of the same code.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
