@@ -54,7 +54,7 @@ page_for_addr (const void *address)
       /* No page.  Expand stack? */
 
 /* add code */
-/* TODO: Time permitting, find theoretical stack limit and check that instead of PUSHA_SIZS */
+/* TODO: Time permitting, find theoretical stack limit and check that instead of PUSHA_SIZE */
       if ((p.addr > PHYS_BASE - STACK_MAX) && ((void *)thread_current()->user_esp - PUSHA_SIZE < address))
         return page_allocate (p.addr, false);
 
@@ -150,40 +150,41 @@ page_out (struct page *p)
      page. */
 
 /* add code here */
+  // Mark page as not present in page table
   pagedir_clear_page (p->thread->pagedir, (void *) p->addr);
 
   /* Has the frame been modified? */
 
 /* add code here */
-  /* If the frame has been modified, set 'dirty' to true. */
+  // Check if page has been modified (dirty)
   dirty = pagedir_is_dirty (p->thread->pagedir, (const void *) p->addr);
 
-  /* If the frame is not dirty (and file != NULL), we have sucsessfully evicted the page. */
+  // If the frame is not dirty (and file != NULL), we have sucsessfully evicted the page
   if ( !dirty )
     ok = true;
 
   /* Write frame contents to disk if necessary. */
-  /* If the file is null, don't write the frame to disk. Instead swap out the frame and save 
-     whether or not the swap was successful. This will overwrite the value of 'ok'. */
+  // If the file is null nothing to write to disk. Instead swap out the frame and save 
+  //  whether or not the swap was successful. This will overwrite the value of 'ok'
   if ( p->file == NULL )
     ok = swap_out(p);
-  /* Otherwise, a file exists for this page. If file contents have been modified, then they must be
-     be written back to the file system on disk, or swapped out. This is determined by the private
-     variable associated with the page. */
+  // If the contents of the frame (associated with a file) have been modified, then they must be
+  //  written back to the file system on disk, or swapped out. This is determined by the private
+  //  variable associated with the page (see below)
   else
     {
       if ( dirty )
       {
-        /* Possibly data demand-paged from executable, so swap */
+        // Possibly data demand-paged from executable, so swap 
         if ( p->private )
           ok = swap_out(p);
-        /* memory mapped */
+        // memory mapped
         else
           ok = file_write_at(p->file, (const void *) p->frame->base, p->file_bytes, p->file_offset);
       }
     }
 
-  /* Make the frame helpd by the page Null */
+  // If successful above, remvoe the page's reference to the fame
   if ( ok )
     p->frame = NULL;
 /* add code here */
